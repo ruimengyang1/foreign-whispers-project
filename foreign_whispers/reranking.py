@@ -157,10 +157,93 @@ def get_shorter_translations(
     Returns:
         Empty list (stub).  Implement to return ``TranslationCandidate`` items.
     """
-    logger.info(
-        "get_shorter_translations called for %.1fs budget (%d chars baseline) — "
-        "returning empty list (student assignment stub).",
-        target_duration_s,
-        len(baseline_es),
+    import re
+
+    baseline = re.sub(r"\s+", " ", baseline_es).strip()
+    if not baseline:
+        return []
+
+    max_chars = max(1, int(target_duration_s * 15.0))
+    if len(baseline) <= max_chars:
+        return []
+
+    candidates: list[TranslationCandidate] = []
+    seen = {baseline}
+
+    def _normalize(text: str) -> str:
+        text = re.sub(r"\s+", " ", text).strip(" ,;:")
+        return re.sub(r"\s+([,.;:!?])", r"\1", text)
+
+    def _replace_phrase(text: str, old: str, new: str) -> str:
+        pattern = re.compile(rf"\b{re.escape(old)}\b", flags=re.IGNORECASE)
+
+        def _repl(match: re.Match) -> str:
+            if match.group(0)[:1].isupper() and new:
+                return new[:1].upper() + new[1:]
+            return new
+
+        return pattern.sub(_repl, text)
+
+    def _add_candidate(text: str, rationale: str) -> None:
+        text = _normalize(text)
+        if not text or len(text) >= len(baseline) or text in seen:
+            return
+        seen.add(text)
+        candidates.append(
+            TranslationCandidate(
+                text=text,
+                char_count=len(text),
+                brevity_rationale=rationale,
+            )
+        )
+
+    phrase_replacements = [
+        ("en este momento", "ahora"),
+        ("en este instante", "ahora"),
+        ("por lo tanto", "asi que"),
+        ("sin embargo", "pero"),
+        ("debido a", "por"),
+        ("a causa de", "por"),
+        ("con el fin de", "para"),
+        ("para poder", "para"),
+        ("de hecho", ""),
+    ]
+    filler_pattern = re.compile(
+        r"^(?:bueno|pues|entonces|la verdad|en realidad),?\s+",
+        flags=re.IGNORECASE,
     )
-    return []
+    soft_words = re.compile(
+        r"\b(?:realmente|simplemente|basicamente|literalmente|muy)\b",
+        flags=re.IGNORECASE,
+    )
+
+    shortened = baseline
+    changed = False
+    for old, new in phrase_replacements:
+        updated = _replace_phrase(shortened, old, new)
+        if updated != shortened:
+            shortened = updated
+            changed = True
+    if changed:
+        _add_candidate(shortened, "shorter phrasing")
+
+    without_filler = filler_pattern.sub("", baseline)
+    if without_filler != baseline:
+        _add_candidate(without_filler, "removed filler opening")
+
+    tighter = filler_pattern.sub("", shortened if changed else baseline)
+    tighter = soft_words.sub("", tighter)
+    _add_candidate(tighter, "removed filler words")
+
+    ordered = [c for c in candidates if c.char_count <= max_chars] or candidates
+    ordered.sort(key=lambda c: (c.char_count, c.text))
+
+    logger.info(
+        "get_shorter_translations produced %d candidates for %.1fs budget "
+        "(%d chars baseline, %d char target).",
+        len(ordered),
+        target_duration_s,
+        len(baseline),
+        max_chars,
+    )
+    return ordered
