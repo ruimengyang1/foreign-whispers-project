@@ -44,7 +44,7 @@ class TranslationService:
         result["language"] = to_code
         return result
 
-    def rerank_for_duration(
+    async def rerank_for_duration(
         self,
         en_transcript: dict,
         es_transcript: dict,
@@ -63,7 +63,12 @@ class TranslationService:
         the stub is implemented.
         """
         import copy
-        from foreign_whispers.alignment import AlignAction, compute_segment_metrics, decide_action
+        from foreign_whispers.alignment import (
+            AlignAction,
+            _estimate_duration,
+            compute_segment_metrics,
+            decide_action,
+        )
         from foreign_whispers.reranking import get_shorter_translations
 
         result = copy.deepcopy(es_transcript)
@@ -87,7 +92,7 @@ class TranslationService:
             if candidates:
                 best = min(
                     candidates,
-                    key=lambda c: abs(len(c.text) / 15.0 - m.source_duration_s),
+                    key=lambda c: abs(_estimate_duration(c.text) - m.source_duration_s),
                 )
                 result["segments"][m.index]["text"] = best.text
 

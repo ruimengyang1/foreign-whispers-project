@@ -34,11 +34,45 @@ def _count_syllables(text: str) -> int:
 
 
 _SYLLABLE_RATE = 4.5  # syllables per second for Romance languages
+_PAUSE_SECONDS = {
+    ",": 0.10,
+    ";": 0.14,
+    ":": 0.14,
+    ".": 0.18,
+    "!": 0.18,
+    "?": 0.18,
+}
+
+
+def _count_words(text: str) -> int:
+    """Count word-like tokens in Latin-script text."""
+    return len(re.findall(r"[A-Za-zÀ-ÿ0-9]+(?:['-][A-Za-zÀ-ÿ0-9]+)?", text))
 
 
 def _estimate_duration(text: str) -> float:
-    """Estimate TTS duration in seconds using a syllable-rate heuristic."""
-    return _count_syllables(text) / _SYLLABLE_RATE
+    """Estimate TTS duration in seconds with a simple speech pacing heuristic.
+
+    The syllable rate remains the main signal, but we add small deterministic
+    adjustments for extra words, pauses, and digits.  This keeps short phrases
+    close to the original notebook baseline while improving longer sentences.
+    """
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if not cleaned:
+        return 0.0
+
+    syllables = _count_syllables(cleaned)
+    words = _count_words(cleaned)
+
+    duration = syllables / _SYLLABLE_RATE
+
+    if words > 2:
+        duration += min(0.04 * (words - 2), 0.32)
+
+    for punct, pause_s in _PAUSE_SECONDS.items():
+        duration += cleaned.count(punct) * pause_s
+
+    duration += min(len(re.findall(r"\d", cleaned)) * 0.05, 0.25)
+    return round(max(duration, 0.18 * words), 3)
 
 
 @dataclasses.dataclass
@@ -298,3 +332,121 @@ def global_align(
         cumulative_drift += gap_shift
 
     return aligned
+
+
+def global_align_dp(
+    metrics: list[SegmentMetrics],
+    silence_regions: list[dict],
+    max_stretch: float = 1.4,
+    beam_width: int = 8,
+) -> list[AlignedSegment]:
+    """Beam-search global alignment that trades off drift, overlap, and retries.
+
+    The greedy baseline always takes the locally preferred action.  This
+    optimizer keeps a small beam of alternative schedules so it can choose a
+    slightly faster stretch now to avoid larger cumulative drift later.
+    """
+    if not metrics:
+        return []
+
+    def _silence_after(end_s: float) -> float:
+        for region in silence_regions:
+            if region.get("label") == "silence" and region["start_s"] >= end_s - 0.1:
+                return max(0.0, region["end_s"] - region["start_s"])
+        return 0.0
+
+    def _candidate_specs(m: SegmentMetrics, available_gap_s: float) -> list[tuple[AlignAction, float, float]]:
+        candidates: list[tuple[AlignAction, float, float]] = []
+
+        if m.predicted_stretch <= 1.1:
+            candidates.append((AlignAction.ACCEPT, 0.0, 1.0))
+
+        if m.predicted_stretch <= max_stretch + 0.35:
+            candidates.append((
+                AlignAction.MILD_STRETCH,
+                0.0,
+                min(max(m.predicted_stretch, 1.0), max_stretch),
+            ))
+
+        if m.overflow_s > 0 and available_gap_s >= m.overflow_s:
+            candidates.append((AlignAction.GAP_SHIFT, m.overflow_s, 1.0))
+
+        if m.predicted_stretch > 1.4:
+            candidates.append((AlignAction.REQUEST_SHORTER, 0.0, 1.0))
+
+        if m.predicted_stretch > 2.5:
+            candidates.append((AlignAction.FAIL, 0.0, 1.0))
+
+        fallback = decide_action(m, available_gap_s)
+        if fallback == AlignAction.GAP_SHIFT:
+            fallback_spec = (fallback, m.overflow_s, 1.0)
+        elif fallback == AlignAction.MILD_STRETCH:
+            fallback_spec = (fallback, 0.0, min(max(m.predicted_stretch, 1.0), max_stretch))
+        else:
+            fallback_spec = (fallback, 0.0, 1.0)
+        candidates.append(fallback_spec)
+
+        deduped: list[tuple[AlignAction, float, float]] = []
+        seen: set[tuple[str, float, float]] = set()
+        for action, gap_shift, stretch in candidates:
+            key = (action.value, round(gap_shift, 3), round(stretch, 3))
+            if key not in seen:
+                seen.add(key)
+                deduped.append((action, gap_shift, stretch))
+        return deduped
+
+    @dataclasses.dataclass
+    class _BeamState:
+        cost: float
+        cumulative_drift: float
+        previous_end: float
+        segments: list[AlignedSegment]
+
+    beam = [_BeamState(cost=0.0, cumulative_drift=0.0, previous_end=float("-inf"), segments=[])]
+
+    for m in metrics:
+        available_gap_s = _silence_after(m.source_end)
+        next_beam: list[_BeamState] = []
+
+        for state in beam:
+            for action, gap_shift, stretch in _candidate_specs(m, available_gap_s):
+                scheduled_start = m.source_start + state.cumulative_drift
+                scheduled_end = scheduled_start + m.source_duration_s + gap_shift
+                overlap_s = max(0.0, state.previous_end - scheduled_start)
+                next_drift = state.cumulative_drift + gap_shift
+
+                penalty = 0.0
+                penalty += gap_shift * 2.5
+                penalty += overlap_s * 25.0
+                penalty += max(0.0, stretch - 1.0) * 1.5
+                penalty += next_drift * 0.75
+                penalty += m.overflow_s * 0.15 if action == AlignAction.REQUEST_SHORTER else 0.0
+                penalty += m.overflow_s * 0.5 if action == AlignAction.FAIL else 0.0
+                penalty += 3.0 if action == AlignAction.FAIL else 0.0
+
+                aligned = AlignedSegment(
+                    index=m.index,
+                    original_start=m.source_start,
+                    original_end=m.source_end,
+                    scheduled_start=scheduled_start,
+                    scheduled_end=scheduled_end,
+                    text=m.translated_text,
+                    action=action,
+                    gap_shift_s=gap_shift,
+                    stretch_factor=stretch,
+                )
+                next_beam.append(_BeamState(
+                    cost=state.cost + penalty,
+                    cumulative_drift=next_drift,
+                    previous_end=scheduled_end,
+                    segments=state.segments + [aligned],
+                ))
+
+        next_beam.sort(key=lambda s: (round(s.cost, 4), round(s.cumulative_drift, 4), len(s.segments)))
+        beam = next_beam[: max(1, beam_width)]
+
+    best = min(
+        beam,
+        key=lambda s: (round(s.cost, 4), round(s.cumulative_drift, 4), len(s.segments)),
+    )
+    return best.segments

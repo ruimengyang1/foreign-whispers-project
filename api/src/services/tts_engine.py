@@ -7,9 +7,16 @@ import glob
 import tempfile
 
 import requests
-import librosa
-import soundfile as sf
-import pyrubberband
+try:
+    import soundfile as sf
+except ImportError:
+    sf = None
+
+try:
+    import pyrubberband
+except ImportError:
+    pyrubberband = None
+
 from pydub import AudioSegment
 
 # ── Chatterbox API configuration ─────────────────────────────────────
@@ -236,8 +243,15 @@ def _postprocess_segment(raw_wav_bytes: bytes | None, target_sec: float,
     raw_wav = work_path / "raw_segment.wav"
     raw_wav.write_bytes(raw_wav_bytes)
 
-    y, sr = librosa.load(str(raw_wav), sr=None)
-    raw_duration = len(y) / sr
+    if sf is not None:
+        y, sr = sf.read(str(raw_wav), dtype="float32")
+    else:
+        segment_audio = AudioSegment.from_wav(str(raw_wav))
+        sr = max(segment_audio.frame_rate, 1)
+        samples = max(int(segment_audio.frame_count()), 0)
+        y = [0.0] * samples
+
+    raw_duration = len(y) / sr if sr else 0.0
 
     if raw_duration == 0:
         return (AudioSegment.silent(duration=target_ms), 1.0, 0.0)
@@ -256,15 +270,17 @@ def _postprocess_segment(raw_wav_bytes: bytes | None, target_sec: float,
         speed_factor = raw_duration / effective_target
         speed_factor = max(SPEED_MIN, min(SPEED_MAX, speed_factor))
 
-    if abs(speed_factor - 1.0) > 0.01:
+    if abs(speed_factor - 1.0) > 0.01 and pyrubberband is not None and sf is not None:
         y_stretched = pyrubberband.time_stretch(y, sr, speed_factor)
     else:
         y_stretched = y
 
     stretched_wav = work_path / "stretched_segment.wav"
-    sf.write(str(stretched_wav), y_stretched, sr)
-
-    segment_audio = AudioSegment.from_wav(str(stretched_wav))
+    if sf is not None:
+        sf.write(str(stretched_wav), y_stretched, sr)
+        segment_audio = AudioSegment.from_wav(str(stretched_wav))
+    else:
+        segment_audio = AudioSegment.from_wav(str(raw_wav))
 
     if len(segment_audio) < target_ms:
         segment_audio += AudioSegment.silent(duration=target_ms - len(segment_audio))
@@ -274,7 +290,7 @@ def _postprocess_segment(raw_wav_bytes: bytes | None, target_sec: float,
     return (segment_audio, speed_factor, raw_duration)
 
 
-def _synced_segment_audio(tts_engine, text: str, target_sec: float, work_dir, stretch_factor: float = 1.0, alignment_enabled: bool = True) -> tuple:
+def _synced_segment_audio(tts_engine, text: str, target_sec: float, work_dir, stretch_factor: float = 1.0, alignment_enabled: bool = True, speaker_wav: str | None = None) -> tuple:
     """Generate TTS audio for *text* and time-stretch it to *target_sec*.
 
     Convenience wrapper kept for callers that don't use the batch path.
@@ -282,7 +298,7 @@ def _synced_segment_audio(tts_engine, text: str, target_sec: float, work_dir, st
     if target_sec <= 0:
         return (None, 0.0, 0.0)
     raw_wav = str(pathlib.Path(work_dir) / "raw_segment.wav")
-    raw_bytes = _synthesize_raw(tts_engine, text, raw_wav)
+    raw_bytes = _synthesize_raw(tts_engine, text, raw_wav, speaker_wav=speaker_wav)
     return _postprocess_segment(raw_bytes, target_sec, stretch_factor, alignment_enabled, str(work_dir))
 
 
@@ -404,7 +420,15 @@ def _compute_speech_offset(source_path: str) -> float:
     return yt_start - whisper_start
 
 
-def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=None, voice_map: dict[str, str] | None = None):
+def text_file_to_speech(
+    source_path,
+    output_path,
+    tts_engine=None,
+    *,
+    alignment=None,
+    speaker_wav: str | None = None,
+    voice_map: dict[str, str] | None = None,
+):
     """Read translated JSON with segment timestamps and produce a time-aligned WAV.
 
     Each segment is individually synthesized and time-stretched to match its
@@ -487,8 +511,10 @@ def text_file_to_speech(source_path, output_path, tts_engine=None, *, alignment=
     with tempfile.TemporaryDirectory() as synth_dir:
         def _do_synth(idx: int, text: str, speaker: str | None) -> tuple[int, bytes | None]:
             wav_path = str(pathlib.Path(synth_dir) / f"seg_{idx}.wav")
-            speaker_wav = voice_map.get(speaker) if voice_map is not None and speaker else None
-            return idx, _synthesize_raw(engine, text, wav_path, speaker_wav=speaker_wav)
+            segment_voice = speaker_wav
+            if voice_map is not None and speaker:
+                segment_voice = voice_map.get(speaker, segment_voice)
+            return idx, _synthesize_raw(engine, text, wav_path, speaker_wav=segment_voice)
 
         with ThreadPoolExecutor(max_workers=_TTS_WORKERS) as pool:
             futures = {

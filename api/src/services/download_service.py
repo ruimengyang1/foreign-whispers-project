@@ -4,19 +4,31 @@ import json
 import pathlib
 from pathlib import Path
 
-from api.src.services import download_engine as _dl
+_dl = None
+
+
+def _engine():
+    global _dl
+    if _dl is None:
+        from api.src.services import download_engine as _download_engine
+        _dl = _download_engine
+    return _dl
 
 
 def get_video_info(url: str):
-    return _dl.get_video_info(url)
+    return _engine().get_video_info(url)
 
 
 def dv_download_video(url: str, destination: str, filename: str | None = None):
-    return _dl.download_video(url, destination, filename)
+    if filename is None:
+        return _engine().download_video(url, destination)
+    return _engine().download_video(url, destination, filename)
 
 
 def dv_download_caption(url: str, destination: str, filename: str | None = None):
-    return _dl.download_caption(url, destination, filename)
+    if filename is None:
+        return _engine().download_caption(url, destination)
+    return _engine().download_caption(url, destination, filename)
 
 
 class DownloadService:
@@ -38,10 +50,14 @@ class DownloadService:
 
     def download_video(self, url: str, destination: str, filename: str | None = None) -> str:
         """Download an MP4 and return the saved path."""
+        if filename is None:
+            return dv_download_video(url, destination)
         return dv_download_video(url, destination, filename)
 
     def download_caption(self, url: str, destination: str, filename: str | None = None) -> str:
         """Download captions and return the saved path."""
+        if filename is None:
+            return dv_download_caption(url, destination)
         return dv_download_caption(url, destination, filename)
 
     # ------------------------------------------------------------------

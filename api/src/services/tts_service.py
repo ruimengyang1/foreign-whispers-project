@@ -4,7 +4,7 @@ import pathlib
 from pathlib import Path
 from typing import Any
 
-from api.src.services.tts_engine import text_file_to_speech as tts_text_file_to_speech
+tts_text_file_to_speech = None
 
 
 class TTSService:
@@ -23,16 +23,23 @@ class TTSService:
         output_path: str,
         *,
         alignment: bool | None = None,
+        speaker_wav: str | None = None,
         voice_map: dict[str, str] | None = None,
     ) -> None:
         """Generate time-aligned TTS audio from a translated JSON transcript."""
-        tts_text_file_to_speech(
-            source_path,
-            output_path,
-            self.tts_engine,
-            alignment=alignment,
-            voice_map=voice_map,
-        )
+        global tts_text_file_to_speech
+        if tts_text_file_to_speech is None:
+            from api.src.services.tts_engine import text_file_to_speech as _tts_text_file_to_speech
+            tts_text_file_to_speech = _tts_text_file_to_speech
+
+        kwargs = {}
+        if alignment is not None:
+            kwargs["alignment"] = alignment
+        if speaker_wav is not None:
+            kwargs["speaker_wav"] = speaker_wav
+        if voice_map is not None:
+            kwargs["voice_map"] = voice_map
+        tts_text_file_to_speech(source_path, output_path, self.tts_engine, **kwargs)
 
     @staticmethod
     def title_for_video_id(video_id: str, search_dir: pathlib.Path) -> str | None:

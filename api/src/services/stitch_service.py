@@ -3,7 +3,26 @@
 import pathlib
 from pathlib import Path
 
-from api.src.services.stitch_engine import stitch_audio, stitch_video_with_timestamps
+stitch_audio = None
+stitch_video_with_timestamps = None
+
+
+def _get_stitch_audio():
+    global stitch_audio
+    if stitch_audio is None:
+        from api.src.services.stitch_engine import stitch_audio as _stitch_audio
+        stitch_audio = _stitch_audio
+    return stitch_audio
+
+
+def _get_stitch_video_with_timestamps():
+    global stitch_video_with_timestamps
+    if stitch_video_with_timestamps is None:
+        from api.src.services.stitch_engine import (
+            stitch_video_with_timestamps as _stitch_video_with_timestamps,
+        )
+        stitch_video_with_timestamps = _stitch_video_with_timestamps
+    return stitch_video_with_timestamps
 
 
 class StitchService:
@@ -22,7 +41,7 @@ class StitchService:
         output_path: str,
     ) -> None:
         """Replace video audio with dubbed TTS — no subtitle burn-in."""
-        stitch_audio(video_path, audio_path, output_path)
+        _get_stitch_audio()(video_path, audio_path, output_path)
 
     def stitch(
         self,
@@ -32,7 +51,7 @@ class StitchService:
         output_path: str,
     ) -> None:
         """Produce a dubbed video with burned-in subtitles (legacy)."""
-        stitch_video_with_timestamps(video_path, caption_path, audio_path, output_path)
+        _get_stitch_video_with_timestamps()(video_path, caption_path, audio_path, output_path)
 
     @staticmethod
     def title_for_video_id(video_id: str, search_dir: pathlib.Path) -> str | None:

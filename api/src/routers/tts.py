@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from api.src.core.config import settings
 from api.src.core.dependencies import resolve_title
 from api.src.services.tts_service import TTSService
+from foreign_whispers.voice_resolution import resolve_speaker_wav
 
 router = APIRouter(prefix="/api")
 
@@ -21,7 +22,10 @@ async def _run_in_threadpool(executor, fn, *args, **kwargs):
     return await loop.run_in_executor(executor, functools.partial(fn, *args, **kwargs))
 
 
-def _build_voice_map(transcript_path: pathlib.Path) -> dict[str, str] | None:
+def _build_voice_map(
+    transcript_path: pathlib.Path,
+    default_speaker_wav: str | None = None,
+) -> dict[str, str] | None:
     """Map labeled speakers to reference WAVs when speaker labels are present."""
     if not transcript_path.exists():
         return None
@@ -33,19 +37,12 @@ def _build_voice_map(transcript_path: pathlib.Path) -> dict[str, str] | None:
         return None
 
     language = transcript.get("language", "es")
-    speakers_dir = settings.data_dir.parent / "speakers" / language
-    if not speakers_dir.exists():
-        return None
-
-    voice_files = sorted(
-        wav.name for wav in speakers_dir.glob("*.wav") if wav.name != "default.wav"
-    )
-    if not voice_files:
-        return None
-
     return {
-        speaker: f"{language}/{voice_files[i % len(voice_files)]}"
-        for i, speaker in enumerate(speakers)
+        speaker: (
+            resolve_speaker_wav(settings.speakers_dir, language, speaker)
+            or default_speaker_wav
+        )
+        for speaker in speakers
     }
 
 
@@ -55,6 +52,10 @@ async def tts_endpoint(
     request: Request,
     config: str = Query(..., pattern=r"^c-[0-9a-f]{7}$"),
     alignment: bool = Query(False),
+    speaker_wav: str | None = Query(
+        None,
+        description="Reference voice WAV path (for example 'es/default.wav')",
+    ),
 ):
     """Generate TTS audio for a translated transcript.
 
@@ -84,10 +85,25 @@ async def tts_endpoint(
         }
 
     source_path = str(trans_dir / f"{title}.json")
-    voice_map = _build_voice_map(pathlib.Path(source_path))
+    source_transcript = pathlib.Path(source_path)
+    language = "es"
+    if source_transcript.exists():
+        transcript = json.loads(source_transcript.read_text())
+        language = transcript.get("language", "es") or "es"
+    resolved_speaker_wav = speaker_wav or resolve_speaker_wav(
+        settings.speakers_dir,
+        language,
+    )
+    voice_map = _build_voice_map(source_transcript, default_speaker_wav=resolved_speaker_wav)
 
     await _run_in_threadpool(
-        None, svc.text_file_to_speech, source_path, str(audio_dir), alignment=alignment, voice_map=voice_map
+        None,
+        svc.text_file_to_speech,
+        source_path,
+        str(audio_dir),
+        alignment=alignment,
+        speaker_wav=resolved_speaker_wav,
+        voice_map=voice_map,
     )
 
     return {

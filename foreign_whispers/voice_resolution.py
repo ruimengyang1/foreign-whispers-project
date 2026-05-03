@@ -12,7 +12,7 @@ def resolve_speaker_wav(
     speakers_dir: Path,
     target_language: str,
     speaker_id: str | None = None,
-) -> str:
+) -> str | None:
     """Resolve the reference WAV path for voice cloning.
 
     Resolution order:
@@ -28,6 +28,22 @@ def resolve_speaker_wav(
     Returns:
         Relative path string for the Chatterbox container (e.g. "es/default.wav").
     """
-    # ---- YOUR CODE HERE ----
-    raise NotImplementedError("Implement this function")
-    # ---- END YOUR CODE ----
+    language = (target_language or "").strip().lower()
+
+    candidates: list[tuple[Path, str]] = []
+    if language and speaker_id:
+        candidates.append((
+            speakers_dir / language / f"{speaker_id}.wav",
+            f"{language}/{speaker_id}.wav",
+        ))
+    if language:
+        candidates.append((
+            speakers_dir / language / "default.wav",
+            f"{language}/default.wav",
+        ))
+    candidates.append((speakers_dir / "default.wav", "default.wav"))
+
+    for abs_path, rel_path in candidates:
+        if abs_path.exists():
+            return rel_path
+    return None

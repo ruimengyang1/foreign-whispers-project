@@ -7,6 +7,9 @@ SegmentMetrics.  The translation re-ranking function is a **student assignment**
 
 import dataclasses
 import logging
+import re
+
+from foreign_whispers.alignment import _estimate_duration
 
 logger = logging.getLogger(__name__)
 
@@ -157,14 +160,12 @@ def get_shorter_translations(
     Returns:
         Empty list (stub).  Implement to return ``TranslationCandidate`` items.
     """
-    import re
-
     baseline = re.sub(r"\s+", " ", baseline_es).strip()
     if not baseline:
         return []
 
     max_chars = max(1, int(target_duration_s * 15.0))
-    if len(baseline) <= max_chars:
+    if _estimate_duration(baseline) <= target_duration_s * 1.05:
         return []
 
     candidates: list[TranslationCandidate] = []
@@ -216,6 +217,7 @@ def get_shorter_translations(
         r"\b(?:realmente|simplemente|basicamente|literalmente|muy)\b",
         flags=re.IGNORECASE,
     )
+    clause_break = re.compile(r"\s*(?:,|;|:)\s*")
 
     shortened = baseline
     changed = False
@@ -235,8 +237,25 @@ def get_shorter_translations(
     tighter = soft_words.sub("", tighter)
     _add_candidate(tighter, "removed filler words")
 
-    ordered = [c for c in candidates if c.char_count <= max_chars] or candidates
-    ordered.sort(key=lambda c: (c.char_count, c.text))
+    parts = clause_break.split(baseline)
+    if len(parts) > 1:
+        for keep in range(len(parts) - 1, 0, -1):
+            trimmed = ", ".join(parts[:keep])
+            _add_candidate(trimmed, "trimmed trailing clause")
+
+    if len(baseline.split()) > 8:
+        _add_candidate(" ".join(baseline.split()[:-2]), "trimmed final words")
+
+    ordered = [c for c in candidates if _estimate_duration(c.text) <= target_duration_s * 1.05]
+    if not ordered:
+        ordered = candidates
+    ordered.sort(
+        key=lambda c: (
+            abs(_estimate_duration(c.text) - target_duration_s),
+            c.char_count,
+            c.text,
+        )
+    )
 
     logger.info(
         "get_shorter_translations produced %d candidates for %.1fs budget "

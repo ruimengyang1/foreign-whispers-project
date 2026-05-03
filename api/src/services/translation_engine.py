@@ -2,24 +2,36 @@ import pathlib
 import json
 import glob
 
-import argostranslate.package
-import argostranslate.translate
+try:
+    import argostranslate.package as _argos_package
+    import argostranslate.translate as _argos_translate
+except ImportError:
+    _argos_package = None
+    _argos_translate = None
+
+
+def _require_argos() -> tuple:
+    if _argos_package is None or _argos_translate is None:
+        raise ImportError("argostranslate is required for translation operations")
+    return _argos_package, _argos_translate
 
 
 def download_and_install_package(from_code="en", to_code="es"):
     # Download and install Argos Translate package
-    argostranslate.package.update_package_index()
-    available_packages = argostranslate.package.get_available_packages()
+    argos_package, _ = _require_argos()
+    argos_package.update_package_index()
+    available_packages = argos_package.get_available_packages()
     package_to_install = next(
         filter(
             lambda x: x.from_code == from_code and x.to_code == to_code, available_packages
         )
     )
-    argostranslate.package.install_from_path(package_to_install.download())
+    argos_package.install_from_path(package_to_install.download())
 
 
 def translate_sentence(sentence, from_code="en", to_code="es"):
-    return argostranslate.translate.translate(sentence, from_code, to_code)
+    _, argos_translate = _require_argos()
+    return argos_translate.translate(sentence, from_code, to_code)
 
 
 def translate_file(trans: dict, from_code="en", to_code="es")-> dict:
