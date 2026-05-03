@@ -69,7 +69,7 @@ function TranscribeSettings() {
         <div>
           <Label htmlFor="use-yt-captions" className="text-sm font-medium cursor-pointer">Use YouTube Captions</Label>
           <p className="text-xs text-muted-foreground mt-1">
-            When available, use YouTube's closed captions instead of running Whisper.
+            When available, use YouTube&apos;s closed captions instead of running Whisper.
             Uncheck to always run Whisper STT.
           </p>
         </div>
@@ -185,7 +185,7 @@ function TTSSettings() {
 
       <div className="space-y-3">
         <p className="text-sm font-medium">Voice Cloning</p>
-        <p className="text-xs text-muted-foreground">Method for cloning the source speaker's voice.</p>
+        <p className="text-xs text-muted-foreground">Method for cloning the source speaker&apos;s voice.</p>
         {VOICE_CLONING_METHODS.map((m) => (
           <button
             type="button"

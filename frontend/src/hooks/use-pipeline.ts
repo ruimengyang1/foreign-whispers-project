@@ -194,7 +194,16 @@ export function usePipeline() {
     try {
       const dl = await run("download", () => downloadVideo(video.url));
       await run("transcribe", () => transcribeVideo(dl.video_id, settings.useYoutubeCaptions));
-      await run("diarize", () => diarizeVideo(dl.video_id));
+      await run("diarize", () =>
+        settings.diarization.length > 0
+          ? diarizeVideo(dl.video_id)
+          : Promise.resolve({
+              video_id: dl.video_id,
+              speakers: [],
+              segments: [],
+              skipped: true,
+            })
+      );
       await run("translate", () => translateVideo(dl.video_id, "es"));
 
       // Run TTS + stitch for each config entry.

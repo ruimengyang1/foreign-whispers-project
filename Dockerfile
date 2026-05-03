@@ -6,26 +6,29 @@ ARG USER_GID=$USER_UID
 
 # System packages
 RUN apt-get update && \
-    apt-get install --no-install-recommends -y ffmpeg rubberband-cli imagemagick curl unzip fonts-dejavu-core && \
+    apt-get install --no-install-recommends -y build-essential cargo rustc ffmpeg rubberband-cli imagemagick curl unzip fonts-dejavu-core && \
     rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
     sed -i 's/rights="none" pattern="@\*"/rights="read|write" pattern="@*"/' /etc/ImageMagick-6/policy.xml 2>/dev/null; \
     sed -i 's/rights="none" pattern="@\*"/rights="read|write" pattern="@*"/' /etc/ImageMagick-7/policy.xml 2>/dev/null; true
 
 # Create non-root user
-RUN groupadd --gid $USER_GID $USERNAME \
-    && useradd -s /bin/bash --uid $USER_UID --gid $USER_GID -m $USERNAME
+RUN getent group $USER_GID >/dev/null || groupadd --gid $USER_GID $USERNAME \
+    && getent passwd $USER_UID >/dev/null || useradd -s /bin/bash --uid $USER_UID --gid $USER_GID -m $USERNAME
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install dependencies as root, then hand ownership to appuser
 WORKDIR /app
-COPY --chown=$USERNAME:$USERNAME pyproject.toml uv.lock ./
+COPY --chown=$USER_UID:$USER_GID pyproject.toml uv.lock ./
+RUN sed -i 's#https://download.pytorch.org/whl/cu128#https://download.pytorch.org/whl/cpu#g' pyproject.toml && \
+    sed -i 's/pytorch-cu128/pytorch-cpu/g' pyproject.toml && \
+    rm -f uv.lock
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project && \
-    chown -R $USERNAME:$USERNAME /app
+    uv sync --no-dev --no-install-project && \
+    chown -R $USER_UID:$USER_GID /app
 
-COPY --chown=$USERNAME:$USERNAME . .
+COPY --chown=$USER_UID:$USER_GID . .
 
-USER $USERNAME
+USER $USER_UID:$USER_GID

@@ -109,7 +109,9 @@ export function PipelineTable({ pipelineState, settings }: PipelineTableProps) {
       case "transcribe":
         return "faster-whisper-medium";
       case "diarize":
-        return "pyannote speaker-diarization";
+        return settings.diarization.length > 0
+          ? settings.diarization.join(", ")
+          : "Disabled";
       case "translate":
         return "argostranslate";
       case "tts": {
