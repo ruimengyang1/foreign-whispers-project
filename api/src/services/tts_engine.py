@@ -345,8 +345,8 @@ def _build_alignment(en_transcript: dict, es_transcript: dict) -> tuple:
 def _shorten_segment_text(en_text: str, es_text: str, target_sec: float) -> str:
     """Try to shorten a Spanish translation to fit *target_sec*.
 
-    Delegates to ``get_shorter_translations()`` (student assignment stub).
-    Returns the original *es_text* if no shorter candidate is available.
+    Delegates to ``get_shorter_translations()`` and returns the original
+    *es_text* if no shorter candidate is available.
     """
     try:
         from foreign_whispers.reranking import get_shorter_translations

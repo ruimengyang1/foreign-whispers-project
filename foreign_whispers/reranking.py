@@ -1,8 +1,8 @@
-"""Deterministic failure analysis and translation re-ranking stubs.
+"""Deterministic failure analysis and translation re-ranking helpers.
 
 The failure analysis function uses simple threshold rules derived from
-SegmentMetrics.  The translation re-ranking function is a **student assignment**
-— see the docstring for inputs, outputs, and implementation guidance.
+SegmentMetrics.  The translation re-ranking function uses lightweight,
+deterministic shortening rules suitable for the notebook assignment.
 """
 
 import dataclasses
@@ -108,57 +108,13 @@ def get_shorter_translations(
 ) -> list[TranslationCandidate]:
     """Return shorter translation candidates that fit *target_duration_s*.
 
-    .. admonition:: Student Assignment — Duration-Aware Translation Re-ranking
-
-       This function is intentionally a **stub that returns an empty list**.
-       Your task is to implement a strategy that produces shorter
-       target-language translations when the baseline translation is too long
-       for the time budget.
-
-       **Inputs**
-
-       ============== ======== ==================================================
-       Parameter      Type     Description
-       ============== ======== ==================================================
-       source_text    str      Original source-language segment text
-       baseline_es    str      Baseline target-language translation (from argostranslate)
-       target_duration_s float Time budget in seconds for this segment
-       context_prev   str      Text of the preceding segment (for coherence)
-       context_next   str      Text of the following segment (for coherence)
-       ============== ======== ==================================================
-
-       **Outputs**
-
-       A list of ``TranslationCandidate`` objects, sorted shortest first.
-       Each candidate has:
-
-       - ``text``: the shortened target-language translation
-       - ``char_count``: ``len(text)``
-       - ``brevity_rationale``: short note on what was changed
-
-       **Duration heuristic**: target-language TTS produces ~15 characters/second
-       (or ~4.5 syllables/second for Romance languages).  So a 3-second budget
-       ≈ 45 characters.
-
-       **Approaches to consider** (pick one or combine):
-
-       1. **Rule-based shortening** — strip filler words, use shorter synonyms
-          from a lookup table, contract common phrases
-          (e.g. "en este momento" → "ahora").
-       2. **Multiple translation backends** — call argostranslate with
-          paraphrased input, or use a second translation model, then pick
-          the shortest output that preserves meaning.
-       3. **LLM re-ranking** — use an LLM (e.g. via an API) to generate
-          condensed alternatives.  This was the previous approach but adds
-          latency, cost, and a runtime dependency.
-       4. **Hybrid** — rule-based first, fall back to LLM only for segments
-          that still exceed the budget.
-
-       **Evaluation criteria**: the caller selects the candidate whose
-       ``len(text) / 15.0`` is closest to ``target_duration_s``.
+    Uses conservative rule-based shortening so the function stays dependency
+    free and deterministic.  Returns candidates sorted by how closely their
+    estimated duration matches the target budget.
 
     Returns:
-        Empty list (stub).  Implement to return ``TranslationCandidate`` items.
+        List of ``TranslationCandidate`` items, or ``[]`` when no shortening is
+        needed or no safe shorter variant was produced.
     """
     baseline = re.sub(r"\s+", " ", baseline_es).strip()
     if not baseline:

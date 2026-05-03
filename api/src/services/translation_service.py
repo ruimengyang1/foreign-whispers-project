@@ -57,10 +57,6 @@ class TranslationService:
         get_shorter_translations() to produce shorter alternatives and picks
         the best fit.  Returns a deep copy of es_transcript; original is never
         mutated.
-
-        Note: get_shorter_translations() is a student assignment stub that
-        currently returns an empty list — so this method is a no-op until
-        the stub is implemented.
         """
         import copy
         from foreign_whispers.alignment import (
