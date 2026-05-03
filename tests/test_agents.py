@@ -8,9 +8,41 @@ from foreign_whispers.reranking import (
 
 
 def test_get_shorter_returns_empty_stub():
-    """Stub returns [] until students implement it."""
+    """No candidates are needed when the baseline already fits the duration budget."""
     result = get_shorter_translations("hello", "hola", 1.0)
     assert result == []
+
+
+def test_get_shorter_translations_returns_shorter_spanish_candidates():
+    baseline = "En este momento, esto es realmente muy complicado, debido a la situacion"
+
+    result = get_shorter_translations(
+        "At this moment, this is really very complicated because of the situation",
+        baseline,
+        2.5,
+    )
+
+    assert result
+    assert all(isinstance(candidate, TranslationCandidate) for candidate in result)
+    assert result[0].char_count < len(baseline)
+    assert all(candidate.text != baseline for candidate in result)
+
+
+def test_get_shorter_translations_is_deterministic():
+    baseline = "En este momento, esto es realmente muy complicado, debido a la situacion"
+
+    first = get_shorter_translations(
+        "At this moment, this is really very complicated because of the situation",
+        baseline,
+        2.5,
+    )
+    second = get_shorter_translations(
+        "At this moment, this is really very complicated because of the situation",
+        baseline,
+        2.5,
+    )
+
+    assert first == second
 
 
 def test_analyze_failures_returns_dataclass():

@@ -19,6 +19,9 @@ _alignment_service = AlignmentService(settings=settings)
 
 def _merge_speakers_into_transcript(title: str, diar_segments: list[dict]) -> None:
     """Update the saved transcription JSON with speaker labels when available."""
+    if not diar_segments:
+        return
+
     transcript_path = settings.transcriptions_dir / f"{title}.json"
     if not transcript_path.exists():
         return

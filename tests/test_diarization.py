@@ -1,6 +1,6 @@
 # tests/test_diarization.py
 import pytest
-from foreign_whispers.diarization import diarize_audio
+from foreign_whispers.diarization import assign_speakers, diarize_audio
 
 
 def test_returns_empty_without_token():
@@ -18,6 +18,33 @@ def test_returns_empty_when_pyannote_absent(monkeypatch):
     monkeypatch.setitem(sys.modules, "pyannote.audio", None)
     result = diarize_audio("/any/path.wav", hf_token="fake-token")
     assert result == []
+
+
+def test_assign_speakers_uses_greatest_temporal_overlap():
+    segments = [
+        {"id": 0, "start": 0.0, "end": 1.0, "text": "hola"},
+        {"id": 1, "start": 1.0, "end": 2.0, "text": "adios"},
+    ]
+    diarization = [
+        {"start_s": 0.0, "end_s": 0.4, "speaker": "SPEAKER_00"},
+        {"start_s": 0.3, "end_s": 1.2, "speaker": "SPEAKER_01"},
+        {"start_s": 1.1, "end_s": 2.0, "speaker": "SPEAKER_02"},
+    ]
+
+    labeled = assign_speakers(segments, diarization)
+
+    assert labeled[0]["speaker"] == "SPEAKER_01"
+    assert labeled[1]["speaker"] == "SPEAKER_02"
+
+
+def test_assign_speakers_falls_back_to_default_without_overlap():
+    segments = [{"id": 0, "start": 3.0, "end": 4.0, "text": "sin solape"}]
+    diarization = [{"start_s": 0.0, "end_s": 1.0, "speaker": "SPEAKER_09"}]
+
+    labeled = assign_speakers(segments, diarization)
+
+    assert labeled[0]["speaker"] == "SPEAKER_00"
+    assert "speaker" not in segments[0]
 
 
 @pytest.mark.requires_pyannote
